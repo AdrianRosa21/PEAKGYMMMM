@@ -6,7 +6,7 @@ using System.Web;
 using System.Web.Security;
 using System.Web.UI;
 
-namespace PEAKGYMM.Account
+namespace PEAKGYMM
 {
     public partial class Login : Page
     {
@@ -49,7 +49,6 @@ namespace PEAKGYMM.Account
 
                         var roleName = roleId == 1 ? "Admin" : "Usuario";
 
-                        // Ticket con rol
                         var ticket = new FormsAuthenticationTicket(
                             1, email, DateTime.Now,
                             DateTime.Now.AddHours(chkRemember.Checked ? 24 : 6),
@@ -60,8 +59,7 @@ namespace PEAKGYMM.Account
                         { HttpOnly = true, Secure = Request.IsSecureConnection };
                         Response.Cookies.Add(cookie);
 
-                        // Redirección limpia sin Page.Buffer
-                        Response.Redirect("~/Default.aspx", false);
+                        Response.Redirect("~/User/MyWorkout.aspx", false);
                         Context.ApplicationInstance.CompleteRequest();
                     }
                 }
@@ -82,7 +80,8 @@ namespace PEAKGYMM.Account
             {
                 var pw = Encoding.UTF8.GetBytes(password);
                 var buf = new byte[salt.Length + pw.Length];
-                
+                System.Buffer.BlockCopy(salt, 0, buf, 0, salt.Length);
+                System.Buffer.BlockCopy(pw, 0, buf, salt.Length, pw.Length);
                 return sha.ComputeHash(buf);
             }
         }

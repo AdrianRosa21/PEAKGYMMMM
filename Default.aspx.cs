@@ -12,11 +12,11 @@ namespace PEAKGYMM
             {
                 if (Context.User.IsInRole("Admin"))
                 {
-                    Response.Redirect("~/Admin/Members.aspx", endResponse: true);
+                    Response.Redirect("~Members.aspx", endResponse: true);
                 }
                 else
                 {
-                    Response.Redirect("~/User/MyWorkout.aspx", endResponse: true);
+                    Response.Redirect("~MyWorkout.aspx", endResponse: true);
                 }
             }
 

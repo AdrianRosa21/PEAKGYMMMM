@@ -53,7 +53,7 @@
           <asp:CheckBox runat="server" ID="chkRemember" CssClass="form-check-input" />
           <label class="form-check-label" for="chkRemember">Recordarme</label>
         </div>
-        <a href="~/Account/Register.aspx" class="link-light text-decoration-none">
+        <a href="Register.aspx" class="link-light text-decoration-none">
           <i class="bi bi-person-plus"></i> Registrarme
         </a>
       </div>

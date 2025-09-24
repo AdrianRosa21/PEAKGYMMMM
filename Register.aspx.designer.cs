@@ -7,7 +7,7 @@
 // </generado automáticamente>
 //------------------------------------------------------------------------------
 
-namespace GymWebForms.Account
+namespace PEAKGYMM
 {
 
 
