@@ -73,10 +73,10 @@
             </p>
 
             <div class="d-grid gap-3 d-sm-flex justify-content-center">
-              <a href="~Login.aspx" class="btn btn-cta btn-lg px-4">
+              <a href="Login.aspx" class="btn btn-cta btn-lg px-4">
                 <i class="bi bi-box-arrow-in-right me-2"></i> Iniciar sesión
               </a>
-              <a href="~Register.aspx" class="btn btn-ghost btn-lg px-4">
+              <a href="Register.aspx" class="btn btn-ghost btn-lg px-4">
                 <i class="bi bi-person-plus me-2"></i> Registrarme
               </a>
             </div>
