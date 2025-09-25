@@ -194,7 +194,7 @@ VALUES
                 { HttpOnly = true, Secure = Request.IsSecureConnection };
                 Response.Cookies.Add(cookie);
 
-                Response.Redirect("Payment.aspx", false);
+                Response.Redirect("Login.aspx", false);
                 Context.ApplicationInstance.CompleteRequest();
             }
             catch (Exception ex)
