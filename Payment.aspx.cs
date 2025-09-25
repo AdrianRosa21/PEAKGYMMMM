@@ -158,7 +158,7 @@ VALUES(@msid, @amount, @method);";
                 }
 
                 // 9) OK
-                lblOk.Text = "¡Membresía activada con éxito! 🎉";
+                lblOk.Text = "¡Membresía activada con éxito!  🎉";
             }
             catch (Exception ex)
             {
