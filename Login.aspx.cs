@@ -72,7 +72,7 @@ namespace PEAKGYMM
 
         // ===== Helpers =====
         private static string GetCs() =>
-            System.Configuration.ConfigurationManager.ConnectionStrings["GymDb"].ConnectionString;
+            System.Configuration.ConfigurationManager.ConnectionStrings["GYM"].ConnectionString;
 
         private static byte[] Hash(string password, byte[] salt)
         {
