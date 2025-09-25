@@ -7,6 +7,7 @@ using System.Web.Security;
 using System.Web.UI;
 
 
+
 namespace PEAKGYMM
 {
     public partial class Login : Page
@@ -45,7 +46,6 @@ FROM dbo.[User] WHERE Email=@e;";
                     int roleId;
                     byte[] hashDb, saltDb;
 
-                    // -------- leer usuario ----------
                     using (var rd = cmd.ExecuteReader())
                     {
                         if (!rd.Read() || !(bool)rd["IsActive"])
@@ -55,17 +55,18 @@ FROM dbo.[User] WHERE Email=@e;";
                         roleId = (int)rd["RoleId"];
                         hashDb = (byte[])rd["PasswordHash"];
                         saltDb = (byte[])rd["PasswordSalt"];
-                    } // reader cerrado, conexión sigue abierta
+                    }
 
-                    // -------- validar contraseña ----------
                     var hashCalc = Hash(password, saltDb);
                     if (!TimingSafeEquals(hashDb, hashCalc))
                     { ShowError("Credenciales inválidas."); return; }
 
-                    // guardar el UserId para el flujo
+                    // ======== SOLO SESSION (sin cookies) ========
                     Session["UserId"] = userId;
+                    Session["Email"] = email;
+                    Session["Role"] = roleId == 1 ? "Admin" : "Usuario";
 
-                    // -------- comprobar membresía activa ----------
+                    // ¿tiene membresía activa?
                     bool tieneActiva;
                     const string sqlActive = @"
 SELECT 1
@@ -81,19 +82,6 @@ WHERE m.UserId = @uid
                         tieneActiva = cmd2.ExecuteScalar() != null;
                     }
 
-                    // -------- emitir cookie de autenticación ----------
-                    var roleName = roleId == 1 ? "Admin" : "Usuario";
-                    var ticket = new FormsAuthenticationTicket(
-                        1, email, DateTime.Now,
-                        DateTime.Now.AddHours(chkRemember.Checked ? 24 : 6),
-                        chkRemember.Checked, roleName);
-
-                    var enc = FormsAuthentication.Encrypt(ticket);
-                    var cookie = new HttpCookie(FormsAuthentication.FormsCookieName, enc)
-                    { HttpOnly = true, Secure = Request.IsSecureConnection };
-                    Response.Cookies.Add(cookie);
-
-                    // -------- redirección según estado ----------
                     if (tieneActiva)
                         Response.Redirect("~/User/MyWorkout.aspx", false);
                     else
