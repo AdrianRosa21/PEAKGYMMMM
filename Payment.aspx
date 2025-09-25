@@ -25,8 +25,8 @@
   </style>
 
   <!-- ===== Campos ocultos que viajan al servidor ===== -->
-  <asp:HiddenField runat="server" ID="hidPlan" />
-  <asp:HiddenField runat="server" ID="hidPrice" />
+<asp:HiddenField runat="server" ID="hidPlan"  ClientIDMode="Static" />
+<asp:HiddenField runat="server" ID="hidPrice" ClientIDMode="Static" />
 
   <div class="container my-5">
     <div class="text-center mb-4">
@@ -123,7 +123,8 @@
 
               <div class="col-md-4">
                 <label class="form-label">Método de pago</label>
-                <asp:DropDownList runat="server" ID="ddlMethod" CssClass="form-select">
+                <asp:DropDownList runat="server" ID="ddlMethod" CssClass="form-select"
+                    ClientIDMode="Static"> 
                   <asp:ListItem Text="Seleccionar..." Value="" />
                   <asp:ListItem Text="Efectivo" Value="CASH" />
                   <asp:ListItem Text="Tarjeta" Value="CARD" />
@@ -171,29 +172,34 @@
       function setPlan(plan) {
           // Inputs visibles
           document.getElementById('<%= txtPlan.ClientID %>').value = plan;
-        document.getElementById('<%= txtPrice.ClientID %>').value = '$ ' + priceMap[plan].toFixed(2);
+      document.getElementById('<%= txtPrice.ClientID %>').value = '$ ' + priceMap[plan].toFixed(2);
 
-        // Campos ocultos que llegan al servidor
-        document.getElementById('<%= hidPlan.ClientID %>').value = plan;
-        document.getElementById('<%= hidPrice.ClientID %>').value = priceMap[plan].toFixed(2);
+      // Hidden para el post
+      document.getElementById('hidPlan').value = plan;                  // ClientIDMode=Static
+      document.getElementById('hidPrice').value = priceMap[plan].toFixed(2);
 
       // Fechas
       const start = document.getElementById('<%= txtStartDate.ClientID %>');
-      const end   = document.getElementById('<%= txtEndDate.ClientID %>');
-      const d0 = start.value ? new Date(start.value + 'T00:00:00') : new Date();
-      const add = plan === 'Mensual' ? 1 : (plan === 'Trimestral' ? 3 : 12);
-      const d1 = new Date(d0); d1.setMonth(d1.getMonth() + add);
-      end.value = d1.toISOString().slice(0,10);
-    }
+    const end   = document.getElementById('<%= txtEndDate.ClientID %>');
+    const d0    = start.value ? new Date(start.value + 'T00:00:00') : new Date();
+    const add   = plan === 'Mensual' ? 1 : (plan === 'Trimestral' ? 3 : 12);
+    const d1    = new Date(d0); d1.setMonth(d1.getMonth() + add);
+    end.value   = d1.toISOString().slice(0,10);
 
-    document.addEventListener('click', (e) => {
-      const btn = e.target.closest('.select-plan');
-      if (btn) setPlan(btn.dataset.plan);
-    });
+    // Si no hay método elegido, asumimos Tarjeta
+    const ddl = document.getElementById('ddlMethod');
+    if (ddl && !ddl.value) ddl.value = 'CARD';
+  }
 
-    document.addEventListener('DOMContentLoaded', () => {
-      const sd = document.getElementById('<%= txtStartDate.ClientID %>');
-        if (!sd.value) sd.value = new Date().toISOString().slice(0, 10);
-    });
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.select-plan');
+    if (btn) setPlan(btn.dataset.plan);
+  });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const sd = document.getElementById('<%= txtStartDate.ClientID %>');
+      if (!sd.value) sd.value = new Date().toISOString().slice(0, 10);
+  });
   </script>
+
 </asp:Content>

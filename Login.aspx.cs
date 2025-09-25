@@ -6,6 +6,7 @@ using System.Web;
 using System.Web.Security;
 using System.Web.UI;
 
+
 namespace PEAKGYMM
 {
     public partial class Login : Page
@@ -23,45 +24,82 @@ namespace PEAKGYMM
             var password = txtPassword.Text;
 
             if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
-            { ShowError("Completa correo y contraseña."); return; }
+            {
+                ShowError("Completa correo y contraseña.");
+                return;
+            }
 
             try
             {
-                const string sql = @"SELECT TOP 1 UserId, PasswordHash, PasswordSalt, RoleId, IsActive
-                                     FROM [User] WHERE Email=@e";
+                const string sqlUser = @"
+SELECT TOP 1 UserId, PasswordHash, PasswordSalt, RoleId, IsActive
+FROM dbo.[User] WHERE Email=@e;";
+
                 using (var cn = new SqlConnection(GetCs()))
-                using (var cmd = new SqlCommand(sql, cn))
+                using (var cmd = new SqlCommand(sqlUser, cn))
                 {
                     cmd.Parameters.AddWithValue("@e", email);
                     cn.Open();
+
+                    int userId;
+                    int roleId;
+                    byte[] hashDb, saltDb;
+
+                    // -------- leer usuario ----------
                     using (var rd = cmd.ExecuteReader())
                     {
                         if (!rd.Read() || !(bool)rd["IsActive"])
                         { ShowError("Credenciales inválidas."); return; }
 
-                        var hashDb = (byte[])rd["PasswordHash"];
-                        var saltDb = (byte[])rd["PasswordSalt"];
-                        var roleId = (int)rd["RoleId"];
+                        userId = (int)rd["UserId"];
+                        roleId = (int)rd["RoleId"];
+                        hashDb = (byte[])rd["PasswordHash"];
+                        saltDb = (byte[])rd["PasswordSalt"];
+                    } // reader cerrado, conexión sigue abierta
 
-                        var hashCalc = Hash(password, saltDb);
-                        if (!TimingSafeEquals(hashDb, hashCalc))
-                        { ShowError("Credenciales inválidas."); return; }
+                    // -------- validar contraseña ----------
+                    var hashCalc = Hash(password, saltDb);
+                    if (!TimingSafeEquals(hashDb, hashCalc))
+                    { ShowError("Credenciales inválidas."); return; }
 
-                        var roleName = roleId == 1 ? "Admin" : "Usuario";
+                    // guardar el UserId para el flujo
+                    Session["UserId"] = userId;
 
-                        var ticket = new FormsAuthenticationTicket(
-                            1, email, DateTime.Now,
-                            DateTime.Now.AddHours(chkRemember.Checked ? 24 : 6),
-                            chkRemember.Checked, roleName);
+                    // -------- comprobar membresía activa ----------
+                    bool tieneActiva;
+                    const string sqlActive = @"
+SELECT 1
+FROM dbo.Member m
+JOIN dbo.Membership ms ON ms.MemberId = m.MemberId
+WHERE m.UserId = @uid
+  AND ms.Status = 'ACTIVE'
+  AND ms.EndDate >= CONVERT(date, SYSUTCDATETIME());";
 
-                        var enc = FormsAuthentication.Encrypt(ticket);
-                        var cookie = new HttpCookie(FormsAuthentication.FormsCookieName, enc)
-                        { HttpOnly = true, Secure = Request.IsSecureConnection };
-                        Response.Cookies.Add(cookie);
-
-                        Response.Redirect("~/User/MyWorkout.aspx", false);
-                        Context.ApplicationInstance.CompleteRequest();
+                    using (var cmd2 = new SqlCommand(sqlActive, cn))
+                    {
+                        cmd2.Parameters.AddWithValue("@uid", userId);
+                        tieneActiva = cmd2.ExecuteScalar() != null;
                     }
+
+                    // -------- emitir cookie de autenticación ----------
+                    var roleName = roleId == 1 ? "Admin" : "Usuario";
+                    var ticket = new FormsAuthenticationTicket(
+                        1, email, DateTime.Now,
+                        DateTime.Now.AddHours(chkRemember.Checked ? 24 : 6),
+                        chkRemember.Checked, roleName);
+
+                    var enc = FormsAuthentication.Encrypt(ticket);
+                    var cookie = new HttpCookie(FormsAuthentication.FormsCookieName, enc)
+                    { HttpOnly = true, Secure = Request.IsSecureConnection };
+                    Response.Cookies.Add(cookie);
+
+                    // -------- redirección según estado ----------
+                    if (tieneActiva)
+                        Response.Redirect("~/User/MyWorkout.aspx", false);
+                    else
+                        Response.Redirect("~/Payment.aspx", false);
+
+                    Context.ApplicationInstance.CompleteRequest();
                 }
             }
             catch

@@ -1,189 +1,216 @@
-﻿using System;
-using System.Data;
-using System.Data.SqlClient;
-using System.Globalization;
-using System.Web;
-using System.Web.UI;
-using System.Web.UI.WebControls;
-namespace PEAKGYMM
+protected void btnPay_Click(object sender, EventArgs e)
 {
-    public partial class Payment : Page
+    lblOk.Visible = false;
+
+    // -------- 1) LEER INPUTS (desde POST) --------
+    string plan     = (Request.Form[hidPlan.UniqueID]  ?? Request.Form["hidPlan"]  ?? "").Trim();
+    string priceRaw = (Request.Form[hidPrice.UniqueID] ?? Request.Form["hidPrice"] ?? "").Trim();
+
+    // Método: intenta por UniqueID y por id estático; si viene inválido, default CARD
+    string methodRaw = (Request.Form[ddlMethod.UniqueID] ?? Request.Form["ddlMethod"] ?? ddlMethod.SelectedValue ?? "").Trim();
+    string method = NormalizeMethod(methodRaw); // -> CASH|CARD|TRANSFER; default CARD
+
+    if (string.IsNullOrEmpty(plan)) { AddError("Selecciona un plan."); return; }
+
+    // Meses según plan
+    int months = plan == "Mensual" ? 1 : (plan == "Trimestral" ? 3 : 12);
+
+    // Precio: hidden o fallback por plan
+    if (!decimal.TryParse(priceRaw, NumberStyles.Any, CultureInfo.InvariantCulture, out var price))
+        price = plan == "Mensual" ? 15m : (plan == "Trimestral" ? 40m : 120m);
+
+    // Fechas
+    if (!DateTime.TryParseExact(txtStartDate.Text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var start))
+        start = DateTime.UtcNow.Date;
+    var end = start.AddMonths(months);
+
+    // Refleja en UI (opcional)
+    txtPlan.Text  = plan;
+    txtPrice.Text = "$ " + price.ToString("0.00", CultureInfo.InvariantCulture);
+    txtEndDate.Text = end.ToString("yyyy-MM-dd");
+
+    // -------- 2) RESOLVER USUARIO (a prueba de balas) --------
+    if (!TryResolveUser(out int userId, out string email))
+    {   // si no se pudo, fuerza login
+        Response.Redirect("~/Login.aspx?returnUrl=" + Server.UrlEncode(Request.RawUrl), false);
+        Context.ApplicationInstance.CompleteRequest();
+        return;
+    }
+
+    // -------- 3) ASEGURAR MEMBER --------
+    int memberId;
+    try
     {
-        protected void Page_Load(object sender, EventArgs e)
+        using (var cn = new SqlConnection(GetCs()))
         {
-            if (!IsPostBack)
-            {
-                // start hoy por defecto (el JS también lo hace por si acaso)
-                txtStartDate.Text = DateTime.UtcNow.Date.ToString("yyyy-MM-dd");
-            }
-        }
+            cn.Open();
 
-        protected void btnPay_Click(object sender, EventArgs e)
-        {
-            // 1) Tomar el plan desde el HiddenField (NO desde txtPlan)
-            var plan = (hidPlan.Value ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(plan))
+            using (var find = new SqlCommand("SELECT MemberId FROM dbo.Member WHERE UserId=@uid", cn))
             {
-                AddError("Selecciona un plan.");
-                return;
-            }
-
-            // 2) Método de pago
-            if (string.IsNullOrWhiteSpace(ddlMethod.SelectedValue))
-            {
-                AddError("Elige un método de pago.");
-                return;
-            }
-
-            try
-            {
-                // 3) Usuario autenticado
-                var email = Context.User?.Identity?.Name;
-                if (string.IsNullOrEmpty(email))
+                find.Parameters.AddWithValue("@uid", userId);
+                var o = find.ExecuteScalar();
+                if (o != null)
                 {
-                    AddError("Sesión expirada. Inicia sesión nuevamente.");
-                    return;
+                    memberId = (int)o;
                 }
-
-                // 4) Meses por plan
-                int months = plan == "Mensual" ? 1 : (plan == "Trimestral" ? 3 : 12);
-
-                // 5) Precio (usa el hidden; si no viene, back-up por plan)
-                decimal price;
-                if (!decimal.TryParse(hidPrice.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out price))
-                    price = plan == "Mensual" ? 15m : (plan == "Trimestral" ? 40m : 120m);
-
-                // 6) Fechas
-                DateTime start;
-                if (!DateTime.TryParseExact(txtStartDate.Text, "yyyy-MM-dd",
-                    CultureInfo.InvariantCulture, DateTimeStyles.None, out start))
-                    start = DateTime.UtcNow.Date;
-
-                DateTime end = start.AddMonths(months);
-
-                // (opcional) reflejar en UI por si quieres ver el resumen ya calculado
-                txtPlan.Text = plan;
-                txtPrice.Text = "$ " + price.ToString("0.00", CultureInfo.InvariantCulture);
-                txtEndDate.Text = end.ToString("yyyy-MM-dd");
-
-                // 7) Buscar UserId
-                int userId;
-                using (var cn = new SqlConnection(GetCs()))
-                using (var cmd = new SqlCommand("SELECT UserId FROM dbo.[User] WHERE Email=@e", cn))
+                else
                 {
-                    cmd.Parameters.AddWithValue("@e", email);
-                    cn.Open();
-                    var o = cmd.ExecuteScalar();
-                    if (o == null) { AddError("Usuario no encontrado."); return; }
-                    userId = (int)o;
-                }
-
-                // 8) Asegurar Member y crear Membership + Payment
-                int memberId;
-                using (var cn = new SqlConnection(GetCs()))
-                {
-                    cn.Open();
-
-                    // ¿Member ya existe para este UserId?
-                    using (var cmdFind = new SqlCommand(
-                        "SELECT MemberId FROM dbo.Member WHERE UserId=@uid", cn))
+                    string fullName = "Sin nombre", uemail = email, phone = null;
+                    using (var u = new SqlCommand("SELECT FullName, Email, Phone FROM dbo.[User] WHERE UserId=@uid", cn))
                     {
-                        cmdFind.Parameters.AddWithValue("@uid", userId);
-                        var o = cmdFind.ExecuteScalar();
-                        if (o != null)
+                        u.Parameters.AddWithValue("@uid", userId);
+                        using (var rd = u.ExecuteReader())
                         {
-                            memberId = (int)o;
-                        }
-                        else
-                        {
-                            // crear Member con datos desde [User]
-                            string fullName = "Sin nombre", uemail = email, phone = null;
-                            using (var cmdU = new SqlCommand(
-                                "SELECT FullName, Email, Phone FROM dbo.[User] WHERE UserId=@uid", cn))
+                            if (rd.Read())
                             {
-                                cmdU.Parameters.AddWithValue("@uid", userId);
-                                using (var rd = cmdU.ExecuteReader())
-                                {
-                                    if (rd.Read())
-                                    {
-                                        if (!(rd["FullName"] is DBNull)) fullName = (string)rd["FullName"];
-                                        if (!(rd["Email"] is DBNull)) uemail = (string)rd["Email"];
-                                        if (!(rd["Phone"] is DBNull)) phone = (string)rd["Phone"];
-                                    }
-                                }
+                                if (!(rd["FullName"] is DBNull)) fullName = (string)rd["FullName"];
+                                if (!(rd["Email"]   is DBNull)) uemail  = (string)rd["Email"];
+                                if (!(rd["Phone"]   is DBNull)) phone   = (string)rd["Phone"];
                             }
+                        }
+                    }
 
-                            const string insMember = @"
+                    const string ins = @"
 INSERT INTO dbo.Member(FullName, Phone, Email, Notes, CreatedAt, IsActive, UserId)
 OUTPUT INSERTED.MemberId
 VALUES(@name, @phone, @mail, NULL, SYSUTCDATETIME(), 1, @uid);";
-                            using (var cmdIns = new SqlCommand(insMember, cn))
-                            {
-                                cmdIns.Parameters.AddWithValue("@name", fullName ?? "Sin nombre");
-                                cmdIns.Parameters.AddWithValue("@phone", (object)phone ?? DBNull.Value);
-                                cmdIns.Parameters.AddWithValue("@mail", uemail);
-                                cmdIns.Parameters.AddWithValue("@uid", userId);
-                                memberId = (int)cmdIns.ExecuteScalar();
-                            }
-                        }
-                    }
-
-                    // Membership
-                    int membershipId;
-                    const string insMembership = @"
-INSERT INTO dbo.Membership(MemberId, Plans, Price, StartDate, EndDate, Status)
-OUTPUT INSERTED.MembershipId
-VALUES(@mid, @plan, @price, @start, @end, 'ACTIVE');";
-                    using (var cmdMs = new SqlCommand(insMembership, cn))
+                    using (var insCmd = new SqlCommand(ins, cn))
                     {
-                        cmdMs.Parameters.AddWithValue("@mid", memberId);
-                        cmdMs.Parameters.AddWithValue("@plan", plan);
-                        cmdMs.Parameters.AddWithValue("@price", price);
-                        cmdMs.Parameters.AddWithValue("@start", start);
-                        cmdMs.Parameters.AddWithValue("@end", end);
-                        membershipId = (int)cmdMs.ExecuteScalar();
-                    }
-
-                    // Payment
-                    const string insPay = @"
-INSERT INTO dbo.Payment(MembershipId, Amount, Method)
-VALUES(@msid, @amount, @method);";
-                    using (var cmdPay = new SqlCommand(insPay, cn))
-                    {
-                        cmdPay.Parameters.AddWithValue("@msid", membershipId);
-                        cmdPay.Parameters.AddWithValue("@amount", price);
-                        cmdPay.Parameters.AddWithValue("@method", ddlMethod.SelectedValue);
-                        cmdPay.ExecuteNonQuery();
+                        insCmd.Parameters.AddWithValue("@name", fullName ?? "Sin nombre");
+                        insCmd.Parameters.AddWithValue("@phone", (object)phone ?? DBNull.Value);
+                        insCmd.Parameters.AddWithValue("@mail",  (object)uemail ?? DBNull.Value);
+                        insCmd.Parameters.AddWithValue("@uid", userId);
+                        memberId = (int)insCmd.ExecuteScalar();
                     }
                 }
-
-                // 9) OK
-                lblOk.Text = "¡Membresía activada con éxito!  🎉";
-            }
-            catch (Exception ex)
-            {
-                AddError("No fue posible procesar el pago: " + ex.Message);
             }
         }
-
-        private static string GetCs()
-        {
-            return System.Configuration.ConfigurationManager
-                   .ConnectionStrings["GYM"].ConnectionString;
-        }
-
-        private void AddError(string msg)
-        {
-            var v = new CustomValidator
-            {
-                IsValid = false,
-                ErrorMessage = msg,
-                Display = ValidatorDisplay.None, // el mensaje saldrá en el ValidationSummary
-                ValidationGroup = "pay",
-                EnableClientScript = false       // <-- evita exigir ServerValidate/JS
-            };
-            Page.Validators.Add(v);
-        }
-
     }
+    catch (Exception x)
+    {
+        AddError("No fue posible crear/obtener el miembro. " + x.Message);
+        return;
+    }
+
+    // -------- 4) INSERTAR MEMBERSHIP --------
+    int membershipId;
+    try
+    {
+        using (var cn = new SqlConnection(GetCs()))
+        using (var cmd = new SqlCommand(@"
+INSERT INTO dbo.Membership(MemberId, Plans, Price, StartDate, EndDate, Status)
+OUTPUT INSERTED.MembershipId
+VALUES(@mid, @plan, @price, @start, @end, 'ACTIVE');", cn))
+        {
+            cmd.Parameters.AddWithValue("@mid", memberId);
+            cmd.Parameters.AddWithValue("@plan", plan);
+            cmd.Parameters.Add("@price", SqlDbType.Decimal).Value = price;
+            cmd.Parameters.Add("@start", SqlDbType.Date).Value   = start.Date;
+            cmd.Parameters.Add("@end",   SqlDbType.Date).Value   = end.Date;
+
+            cn.Open();
+            membershipId = (int)cmd.ExecuteScalar();
+        }
+    }
+    catch (SqlException sx)
+    {
+        AddError("No fue posible registrar la membresía. " + sx.Message);
+        return;
+    }
+
+    // -------- 5) INSERTAR PAYMENT (con PaidAt) --------
+    try
+    {
+        using (var cn = new SqlConnection(GetCs()))
+        using (var cmd = new SqlCommand(@"
+INSERT INTO dbo.Payment(MembershipId, Amount, Method, PaidAt)
+VALUES(@msid, @amount, @method, SYSUTCDATETIME());", cn))
+        {
+            cmd.Parameters.AddWithValue("@msid", membershipId);
+            cmd.Parameters.Add("@amount", SqlDbType.Decimal).Value = price;
+            cmd.Parameters.AddWithValue("@method", method);
+
+            cn.Open();
+            cmd.ExecuteNonQuery();
+        }
+    }
+    catch (SqlException sx)
+    {
+        AddError("No fue posible registrar el pago. " + sx.Message);
+        return;
+    }
+
+    // -------- 6) LISTO --------
+    lblOk.Text = "¡Membresía activada con éxito! 🎉";
+    lblOk.Visible = true;
+    Response.Redirect("~/User/MyWorkout.aspx", false);
+}
+
+
+// ===== Helpers =====
+private static string NormalizeMethod(string raw)
+{
+    switch ((raw ?? "").Trim().ToUpperInvariant())
+    {
+        case "CASH":     return "CASH";
+        case "CARD":     return "CARD";
+        case "TRANSFER": return "TRANSFER";
+        default:         return "CARD"; // default seguro
+    }
+}
+
+private bool TryResolveUser(out int userId, out string email)
+{
+    userId = 0; email = null;
+
+    // 1) Session de Login
+    if (Session["UserId"] is int sid && sid > 0)
+    {
+        userId = sid;
+        try
+        {
+            using (var cn = new SqlConnection(GetCs()))
+            using (var cmd = new SqlCommand("SELECT Email FROM dbo.[User] WHERE UserId=@id", cn))
+            {
+                cmd.Parameters.AddWithValue("@id", sid);
+                cn.Open();
+                var o = cmd.ExecuteScalar();
+                if (o != null) email = (string)o;
+            }
+        } catch { /* opcional */ }
+        return true;
+    }
+
+    // 2) Context
+    if (Context?.User?.Identity?.IsAuthenticated == true)
+        email = Context.User.Identity.Name;
+
+    // 3) Cookie FormsAuth
+    if (string.IsNullOrEmpty(email))
+    {
+        var c = Request.Cookies[FormsAuthentication.FormsCookieName];
+        if (c != null && !string.IsNullOrEmpty(c.Value))
+        {
+            var t = FormsAuthentication.Decrypt(c.Value);
+            if (t != null && !t.Expired) email = t.Name;
+        }
+    }
+
+    if (string.IsNullOrEmpty(email)) return false;
+
+    // 4) Mapear email -> UserId
+    try
+    {
+        using (var cn = new SqlConnection(GetCs()))
+        using (var cmd = new SqlCommand("SELECT UserId FROM dbo.[User] WHERE Email=@e", cn))
+        {
+            cmd.Parameters.AddWithValue("@e", email);
+            cn.Open();
+            var o = cmd.ExecuteScalar();
+            if (o == null) return false;
+            userId = (int)o;
+            return true;
+        }
+    }
+    catch { return false; }
 }
